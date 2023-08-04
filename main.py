@@ -1,4 +1,6 @@
 # 1 Preparation
+
+import GstoreConnector
 # 1.1 Prepare for LLM
 
 # Only For Azure OpenAI
@@ -70,6 +72,14 @@
 import os
 import time
 
+
+# 定义llm
+# 准备一个graph_store用来存放gstore
+# 需要一个RDF三元组数据集
+# 把RDF三元组数据集存入gstore中
+# 构建storage_context
+# 利用KnowledgeGraphQueryEngine（storage_context,service_context,llm=llm）进行查询
+
 os.environ['OPENAI_API_KEY'] = "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"
 
 import logging
@@ -97,125 +107,59 @@ llm_predictor = LLMPredictor(llm)
 service_context = ServiceContext.from_defaults(llm_predictor=llm_predictor, chunk_size_limit=512)
 
 # 利用 LLM，几行代码构建知识图谱
-# 1.2  Prepare for NebulaGraph as Graph Store  # 准备 GraphStore
-# os.environ['NEBULA_USER'] = "root"
-# os.environ['NEBULA_PASSWORD'] = "nebula" # default password
-# os.environ['NEBULA_ADDRESS'] = "127.0.0.1:9669" # assumed we have NebulaGraph installed locally
-#
-# space_name = "guardians"
-# edge_types, rel_prop_names = ["relationship"], ["relationship"] # default, could be omit if create from an empty kg
-# tags = ["entity"] # default, could be omit if create from an empty kg
 
-# graph_store = NebulaGraphStore(space_name=space_name, edge_types=edge_types, rel_prop_names=rel_prop_names, tags=tags)
-#
-# storage_context = StorageContext.from_defaults(graph_store=graph_store)
-#
-# # 从维基百科下载、预处理数据
-# from llama_index import download_loader
-#
-# WikipediaReader = download_loader("WikipediaReader")
-#
-# loader = WikipediaReader()
-#
-# documents = loader.load_data(pages=['Guardians of the Galaxy Vol. 3'], auto_suggest=False)
-#
-# # print(documents) 'text'
-# # time.sleep(100)
-#
-# # 利用 LLM 从文档中抽取知识三元组，并存储到 GraphStore（NebulaGraph）
-# kg_index = KnowledgeGraphIndex.from_documents(
-#     documents,
-#     storage_context=storage_context,
-#     max_triplets_per_chunk=10,
-#     service_context=service_context,
-#     space_name=space_name,
-#     edge_types=edge_types,
-#     rel_prop_names=rel_prop_names,
-#     tags=tags,
-#     include_embeddings=True,
-# )
+gc = GstoreConnector.GstoreConnector("127.0.0.1", 9000, "ghttp", "root", "123456")
+# # 参数含义：[服务器IP]，[服务器上http端口]，[http服务类型]，[用户名]，[密码]
+# 功能：初始化
+
+res = gc.build("demo", "C:/Users/64367/Desktop/llm_kg_llama_index/Example1 N-Triples.nt")
+# 功能：通过RDF文件新建一个数据库
+# 参数含义：[数据库名称]，[.nt文件路径]，[请求类型"GET"和"post",如果请求类型为“GET”，则可以省略]
+
+
+# 1.2  Prepare for NebulaGraph as Graph Store  # 准备 GraphStore
+
+storage_context = StorageContext.from_defaults(graph_store=gc)
+
 
 if __name__ == '__main__':
-    # from langchain.chat_models import ChatOpenAI
-    # from langchain.chains import NebulaGraphQAChain
-    # from langchain.graphs import NebulaGraph
 
-    from langchain.chat_models import ChatOpenAI
-    from langchain.chains import GraphSparqlQAChain
-    from langchain.graphs import RdfGraph
+    # Now we have a Knowledge Graph built on top of Wikipedia. With NebulaGraph LLM tooling, we could query the KG in Natural language(NL2Cypher).
 
-    graph = RdfGraph(
-        # source_file="http://www.w3.org/People/Berners-Lee/card",
-        # source_file="C:/Users/64367/Desktop/Demo_llm2kg/Example1 N-Triples.nt",
-        # source_file="C:/Users/64367/Desktop/Demo_llm2kg/disambiguations_en.nt",
-        source_file="C:/Users/64367/Desktop/Demo_llm2kg/Example1 N-Triples.nt",
-        standard="rdf",
-        local_copy="test.ttl",
+    # First, let's use Llama Index:
+    from llama_index.query_engine import KnowledgeGraphQueryEngine
+
+    from llama_index.storage.storage_context import StorageContext
+    from llama_index.graph_stores import NebulaGraphStore
+
+    nl2kg_query_engine = KnowledgeGraphQueryEngine(
+        storage_context=storage_context,
+        service_context=service_context,
+        llm=llm,
+        verbose=True,
     )
 
-    # graph = NebulaGraph(
-    #     space=space_name,
-    #     username="root",
-    #     password="nebula",
-    #     address="127.0.0.1",
-    #     port=9669,
-    #     session_pool_size=30,
-    # )
+    # We could see KnowledgeGraphQueryEngine could be used to Generate Graph Query and do query for us
+    #     and fianlly LLM could help with the answer synthesis in one go!
 
-    chain = GraphSparqlQAChain.from_llm(
-        llm, graph=graph, verbose=True
+    response = nl2kg_query_engine.query(
+        "Tell me about the career of 罗纳尔多·路易斯·纳萨里奥·德·利马",
     )
 
-    # chain = NebulaGraphQAChain.from_llm(
-    #     llm, graph=graph, verbose=True
-    # )
-
-    # chain.run(
+    display(Markdown(f"<b>{response}</b>"))
+    #
+    # # Apart from the e2e KGQA, we could ask for only NL2Cypher like this with generate_query.
+    #
+    # graph_query = nl2kg_query_engine.generate_query(
     #     "Tell me about Peter Quill?",
     # )
-
-    # chain.run(
-    #     "Save that the person with the name 'Timothy Berners-Lee' has a work homepage at 'http://www.w3.org/foo/bar/'"
-    # )
-
-    chain.run("Tell me about the career of 罗纳尔多·路易斯·纳萨里奥·德·利马")
-
-    # query = (
-    #     """PREFIX foaf: <http://xmlns.com/foaf/0.1/>\n"""
-    #     """SELECT ?hp\n"""
-    #     """WHERE {\n"""
-    #     """    ?person foaf:name "Timothy Berners-Lee" . \n"""
-    #     """    ?person foaf:workplaceHomepage ?hp .\n"""
-    #     """}"""
-    # )
-    # print(graph.query(query))
-
-
-    # Graph RAG
-    # Apart from the NL2Cypher fashion of exploiting KG in QA, especially for complex tasks,
-    #     we could also do it in the Retrieval Arguments Generation way.
-
-    # from llama_index import load_index_from_storage
+    # graph_query = graph_query.replace("WHERE", "\n  WHERE").replace("RETURN", "\nRETURN")
     #
-    # storage_context_graph = StorageContext.from_defaults(persist_dir='./storage_graph', graph_store=graph_store)
-    # kg_index_new = load_index_from_storage(
-    #     storage_context=storage_context_graph,
-    #     service_context=service_context,
-    #     max_triplets_per_chunk=10,
-    #     space_name=space_name,
-    #     edge_types=edge_types,
-    #     rel_prop_names=rel_prop_names,
-    #     tags=tags,
-    #     include_embeddings=True,
-    # )
-    #
-    # kg_rag_query_engine = kg_index_new.as_query_engine(
-    #     include_text=False,
-    #     retriever_mode='keyword',
-    #     response_mode="tree_summarize",
-    # )
-    #
-    # response = kg_rag_query_engine.query(
-    #     "Tell me about Peter Quill?"
-    # )
-    # display(Markdown(f"<b>{response}</b>"))
+    # display(
+    #     Markdown(
+    #         f"""
+    # ```cypher
+    # {graph_query}
+    # ```
+    # """
+    #     )
